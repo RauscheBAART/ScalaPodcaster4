@@ -1,0 +1,185 @@
+name: Build ScalaPodcaster (macOS)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  # Allows manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    name: macOS VST3 + AU
+    runs-on: macos-latest
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Cache JUCE (saves several minutes on repeated runs) ─────────────
+      - name: Cache JUCE
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-7.0.9-macos-v1-${{ runner.os }}
+
+      # ── 3. Configure with CMake (universal binary: Intel + Apple Silicon) ──
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+            -G "Xcode"
+
+      # ── 4. Build VST3 + AU + Standalone ─────────────────────────────────────
+      - name: Build VST3
+        run: |
+          cmake --build build \
+            --config Release \
+            --target ScalaPodcaster_VST3 \
+            --parallel 4
+
+      - name: Build AU
+        run: |
+          cmake --build build \
+            --config Release \
+            --target ScalaPodcaster_AU \
+            --parallel 4
+
+      - name: Build Standalone
+        run: |
+          cmake --build build \
+            --config Release \
+            --target ScalaPodcaster_Standalone \
+            --parallel 4
+
+      # ── 5. Locate and verify output ────────────────────────────────────────
+      - name: Verify output
+        run: |
+          VST3="build/ScalaPodcaster_artefacts/Release/VST3/ScalaPodcaster.vst3"
+          AU="build/ScalaPodcaster_artefacts/Release/AU/ScalaPodcaster.component"
+          STANDALONE="build/ScalaPodcaster_artefacts/Release/Standalone/ScalaPodcaster.app"
+
+          for path in "$VST3" "$AU" "$STANDALONE"; do
+            if [ -d "$path" ]; then
+              echo "✅ Found: $path"
+              file "$path"/Contents/MacOS/* 2>/dev/null || true
+            else
+              echo "❌ Missing: $path"
+              exit 1
+            fi
+          done
+
+      # ── 6. Ad-hoc code sign (lets the plugin run locally without a paid
+      #       Apple Developer ID; users may still need to right-click > Open
+      #       the first time, or clear the quarantine flag, since this is not
+      #       notarized) ─────────────────────────────────────────────────────
+      - name: Ad-hoc code sign
+        run: |
+          codesign --force --deep -s - "build/ScalaPodcaster_artefacts/Release/VST3/ScalaPodcaster.vst3"
+          codesign --force --deep -s - "build/ScalaPodcaster_artefacts/Release/AU/ScalaPodcaster.component"
+          codesign --force --deep -s - "build/ScalaPodcaster_artefacts/Release/Standalone/ScalaPodcaster.app"
+
+      # ── 7. Package as ZIP ──────────────────────────────────────────────────
+      - name: Package
+        run: |
+          OUT="ScalaPodcaster_macOS_universal.zip"
+
+          mkdir -p package
+          cp -R "build/ScalaPodcaster_artefacts/Release/VST3/ScalaPodcaster.vst3" package/
+          cp -R "build/ScalaPodcaster_artefacts/Release/AU/ScalaPodcaster.component" package/
+          cp -R "build/ScalaPodcaster_artefacts/Release/Standalone/ScalaPodcaster.app" package/
+
+          cat > package/INSTALL.txt << 'EOF'
+          ScalaPodcaster – Podcast Mastering Plugin (v2.0)
+          ==========================================
+          macOS Universal Binary (Intel + Apple Silicon)
+
+          SIGNAL CHAIN:
+            Input → EQ/De-Esser → Compressor → LUFS Makeup → True-Peak Limiter → Output
+
+          LOUDNESS TARGETS (selectable preset, or Custom for a free value):
+            -14 LUFS  (Spotify / YouTube)
+            -16 LUFS  (Apple Podcasts)
+            -23 LUFS  (EBU R128 Broadcast)
+            -24 LUFS  (ATSC A/85 US Broadcast)
+            Custom    (free -36 to -6 LUFS slider)
+
+          True-Peak Limiter ceiling: -1 dBTP, always active.
+          Loudness normalisation is applied across the whole signal from the
+          first sample onward (no untreated startup gap).
+
+          INSTALLATION:
+            VST3:       copy ScalaPodcaster.vst3 to ~/Library/Audio/Plug-Ins/VST3/
+            AU:         copy ScalaPodcaster.component to ~/Library/Audio/Plug-Ins/Components/
+            Standalone: move ScalaPodcaster.app to /Applications (or run directly)
+
+            Then rescan plugins in your DAW (Logic Pro will rescan AU automatically
+            on next launch; other DAWs may need a manual rescan in preferences).
+
+          GATEKEEPER NOTE:
+            This build is ad-hoc signed (not notarized by Apple). On first launch,
+            macOS may block it. To allow it: right-click the file > Open, or run
+            in Terminal:  xattr -dr com.apple.quarantine /path/to/ScalaPodcaster.vst3
+            (repeat for the .component and .app as needed)
+
+          DAW COMPATIBILITY:
+            ✅ Logic Pro         → AU, auto-scanned
+            ✅ GarageBand        → AU, auto-scanned
+            ✅ DaVinci Resolve   → VST3, Preferences > VST Plugin Folders
+            ✅ Reaper            → VST3 or AU
+            ✅ Bitwig Studio     → VST3
+            ✅ Cubase / Nuendo   → VST3, auto-scanned
+            ✅ Ableton Live 11+  → VST3 or AU
+            ✅ Studio One        → VST3 or AU
+
+          PARAMETERS:
+            EQ Section:
+              HPF Frequency   : 20–400 Hz   (removes rumble, default 80 Hz)
+              Low Shelf Gain  : ±6 dB       (warmth at 200 Hz)
+              Presence Gain   : ±6 dB       (clarity at 3.5 kHz)
+              De-Esser Thresh : -60–0 dB    (tames sibilance at 7.5 kHz)
+              De-Esser On/Off
+
+            Compressor Section:
+              Threshold       : -60–0 dB    (default -24 dB)
+              Ratio           : 1–20:1      (default 4:1)
+              Knee            : 0–12 dB     (soft knee, default 6 dB)
+              Attack          : 0.1–200 ms  (default 10 ms)
+              Release         : 10–2000 ms  (default 80 ms)
+              Makeup Gain     : -12–+24 dB
+
+            Loudness Section:
+              Loudness Target : preset dropdown (see above) or Custom
+              Custom Target   : -36 to -6 LUFS (only active when Custom selected)
+
+            Output:
+              Integrated LUFS meter with target line
+              Momentary LUFS meter
+              Gain Reduction meter
+              True-Peak Limiter (-1 dBTP, always active)
+
+              Bypass (global)
+          EOF
+
+          cd package && zip -r "../$OUT" . -x '.*' && cd ..
+          echo "✅ Packaged: $OUT ($(du -h "$OUT" | cut -f1))"
+
+      # ── 8. Upload artifact ─────────────────────────────────────────────────
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ScalaPodcaster-macOS-Universal
+          path: ScalaPodcaster_macOS_universal.zip
+          retention-days: 30
+
+      # ── 9. Create GitHub Release on version tags ────────────────────────────
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ScalaPodcaster_macOS_universal.zip
+          generate_release_notes: true
