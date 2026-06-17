@@ -11,7 +11,7 @@ on:
 jobs:
   build-macos:
     name: macOS VST3 + AU
-    runs-on: macos-latest
+    runs-on: macos-13
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ScalaPodcaster4/build/_deps
-          key: juce-7.0.9-macos-v1-${{ runner.os }}
+          key: juce-7.0.12-macos-v1-${{ runner.os }}
 
       # ── 3. Configure with CMake (universal binary: Intel + Apple Silicon) ──
       - name: Configure CMake
