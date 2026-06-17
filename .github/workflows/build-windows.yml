@@ -11,7 +11,7 @@ on:
 jobs:
   build-windows:
     name: Windows VST3
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ScalaPodcaster4/build/_deps
-          key: juce-7.0.9-windows-v4-${{ runner.os }}
+          key: juce-7.0.9-windows-v5-${{ runner.os }}
 
       # ── 3. Configure with CMake (MSVC) ─────────────────────────────────────
       - name: Configure CMake
