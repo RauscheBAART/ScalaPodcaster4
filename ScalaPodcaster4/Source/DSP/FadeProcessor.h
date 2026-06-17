@@ -62,7 +62,14 @@ public:
 
         const int64_t fadeInSamples  = static_cast<int64_t>(fadeInSeconds  * sampleRate);
         const int64_t fadeOutSamples = static_cast<int64_t>(fadeOutSeconds * sampleRate);
-        const int64_t silenceGrace   = static_cast<int64_t>(0.08 * sampleRate); // 80 ms
+        // 3 seconds of uninterrupted near-digital-silence required before
+        // triggering fade-out. This prevents false triggers on natural speech
+        // pauses, breath gaps, or room tone — only true end-of-clip silence
+        // (as inserted by the DAW after the last audio region) qualifies.
+        const int64_t silenceGrace   = static_cast<int64_t>(3.0 * sampleRate);
+        // -90 dBFS threshold: only triggers on near-digital silence, not
+        // quiet room tone or low-level hum that could appear during pauses.
+        const float silenceThreshold = juce::Decibels::decibelsToGain(-90.0f);
 
         // --- End-of-track detection (offline only) ---
         if (hostIsNonRealtime && !fadeOutTriggered)
@@ -75,20 +82,22 @@ public:
                     rmsSum += data[i] * data[i];
             }
             float rms = std::sqrt(rmsSum / (float)(numSamples * numCh));
-            bool  isSilent = (rms < juce::Decibels::decibelsToGain(-70.0f));
+            bool  isSilent = (rms < silenceThreshold);
 
             if (isSilent)
             {
                 silentSampleCount += numSamples;
                 if (silentSampleCount >= silenceGrace && fadeOutStartSample < 0)
                 {
-                    // Mark the fade-out as starting 'silenceGrace' samples ago.
+                    // Start fade-out from the moment silence began.
                     fadeOutStartSample = samplePosition - silentSampleCount;
                     fadeOutTriggered   = true;
                 }
             }
             else
             {
+                // Any non-silent block resets the counter — a pause in speech
+                // won't accumulate toward the 3-second threshold.
                 silentSampleCount = 0;
             }
         }
