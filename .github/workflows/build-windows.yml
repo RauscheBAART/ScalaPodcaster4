@@ -22,11 +22,12 @@ jobs:
       - name: Cache JUCE
         uses: actions/cache@v4
         with:
-          path: build/_deps
+          path: ScalaPodcaster4/build/_deps
           key: juce-7.0.9-windows-v4-${{ runner.os }}
 
       # ── 3. Configure with CMake (MSVC) ─────────────────────────────────────
       - name: Configure CMake
+        working-directory: ScalaPodcaster4
         run: |
           cmake -B build `
             -DCMAKE_BUILD_TYPE=Release `
@@ -35,6 +36,7 @@ jobs:
 
       # ── 4. Build VST3 ──────────────────────────────────────────────────────
       - name: Build VST3
+        working-directory: ScalaPodcaster4
         run: |
           cmake --build build `
             --config Release `
@@ -43,6 +45,7 @@ jobs:
 
       # ── 5. Locate and verify output ────────────────────────────────────────
       - name: Verify output
+        working-directory: ScalaPodcaster4
         run: |
           $vst3 = "build\ScalaPodcaster_artefacts\Release\VST3\ScalaPodcaster.vst3"
           if (Test-Path $vst3) {
@@ -55,9 +58,10 @@ jobs:
 
       # ── 6. Package as ZIP ──────────────────────────────────────────────────
       - name: Package VST3
+        working-directory: ScalaPodcaster4
         run: |
           $src = "build\ScalaPodcaster_artefacts\Release\VST3\ScalaPodcaster.vst3"
-          $out = "ScalaPodcaster_Windows_x64.zip"
+          $out = "..\ScalaPodcaster_Windows_x64.zip"
 
           # Write install instructions
           $readme = @"
@@ -126,7 +130,7 @@ jobs:
           $readme | Out-File -FilePath "INSTALL.txt" -Encoding UTF8
 
           Compress-Archive -Path $src, "INSTALL.txt" -DestinationPath $out -Force
-          Write-Host "✅ Packaged: $out ($('{0:N1}' -f ((Get-Item $out).Length / 1MB)) MB)"
+          Write-Host "✅ Packaged: $out"
 
       # ── 7. Upload artifact ─────────────────────────────────────────────────
       - name: Upload VST3 artifact
